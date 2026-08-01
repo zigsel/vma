@@ -44,8 +44,8 @@
         // Consumers provide their own "vulkan" module, so this stays lazy and is
         // never fetched by downstream projects.
         .vulkan_zig = .{
-            .url = "https://github.com/Snektron/vulkan-zig/archive/refs/heads/master.tar.gz",
-            .hash = "vulkan-0.0.0-r7Ytx8t9AwDbdPvKCQU2qrevpeTvH9v4E9iSrnA46zZU",
+            .url = "git+https://github.com/Snektron/vulkan-zig#b496a6a561ffbbeb530b0f9ed4e059f88c0723a5",
+            .hash = "vulkan-0.0.0-r7Ytx7N9AwD7IZt5_XNHtkJ4G9qY0pCH-cpcOsbL8wzD",
             .lazy = true,
         },
     },
