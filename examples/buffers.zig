@@ -33,7 +33,7 @@ pub fn createAllocator(ctx: Context) !vma.Allocator {
 pub fn createVertexBuffer(allocator: vma.Allocator, size: vk.DeviceSize) !vma.Allocator.BufferResult {
     return allocator.createBuffer(&.{
         .size = size,
-        .usage = .{ .vertex_buffer_bit = true, .transfer_dst_bit = true },
+        .usage = .{ .vertex_buffer = true, .transfer_dst = true },
         .sharing_mode = .exclusive,
     }, .{
         .usage = .auto,
@@ -44,7 +44,7 @@ pub fn createVertexBuffer(allocator: vma.Allocator, size: vk.DeviceSize) !vma.Al
 pub fn uploadViaStaging(allocator: vma.Allocator, data: []const u8) !vma.Allocator.BufferResult {
     const staging = try allocator.createBuffer(&.{
         .size = data.len,
-        .usage = .{ .transfer_src_bit = true },
+        .usage = .{ .transfer_src = true },
         .sharing_mode = .exclusive,
     }, .{
         .usage = .auto,
@@ -68,9 +68,9 @@ pub fn createDepthImage(allocator: vma.Allocator, width: u32, height: u32) !vma.
         .extent = .{ .width = width, .height = height, .depth = 1 },
         .mip_levels = 1,
         .array_layers = 1,
-        .samples = .{ .@"1_bit" = true },
+        .samples = .{ .@"1" = true },
         .tiling = .optimal,
-        .usage = .{ .depth_stencil_attachment_bit = true },
+        .usage = .{ .depth_stencil_attachment = true },
         .sharing_mode = .exclusive,
         .initial_layout = .undefined,
     }, .{

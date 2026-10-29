@@ -73,11 +73,11 @@ fn check(r: c.VkResult) Error!void {
 /// C API wants opaque pointers. Both are just the same integer, so we convert by
 /// round-tripping through it. A null handle (value 0) becomes a null pointer.
 inline fn toC(comptime CHandle: type, handle: anytype) CHandle {
-    return @ptrFromInt(@intFromEnum(handle));
+    return @ptrFromInt(@backingInt(handle));
 }
 
 inline fn toVk(comptime VkHandle: type, ptr: anytype) VkHandle {
-    return @enumFromInt(@intFromPtr(ptr));
+    return @fromBackingInt(@intFromPtr(ptr));
 }
 
 inline fn optName(p: [*c]const u8) ?[*:0]const u8 {
@@ -129,7 +129,8 @@ pub const AllocatorCreateFlags = packed struct(u32) {
     khr_maintenance4: bool = false, // 0x0080
     khr_maintenance5: bool = false, // 0x0100
     khr_external_memory_win32: bool = false, // 0x0200
-    _reserved: u22 = 0,
+    khr_extended_flags: bool = false, // 0x0400
+    _reserved: u21 = 0,
 
     pub inline fn toInt(self: AllocatorCreateFlags) u32 {
         return @bitCast(self);
@@ -384,17 +385,19 @@ pub const AllocationCreateInfo = struct {
     pool: ?Pool = null,
     user_data: ?*anyopaque = null,
     priority: f32 = 0,
+    min_alignment: vk.DeviceSize = 0,
 
     fn toC(self: AllocationCreateInfo) c.VmaAllocationCreateInfo {
         return .{
             .flags = self.flags.toInt(),
-            .usage = @intCast(@intFromEnum(self.usage)),
-            .requiredFlags = @bitCast(self.required_flags),
-            .preferredFlags = @bitCast(self.preferred_flags),
+            .usage = @intCast(@backingInt(self.usage)),
+            .requiredFlags = self.required_flags.toInt(),
+            .preferredFlags = self.preferred_flags.toInt(),
             .memoryTypeBits = self.memory_type_bits,
             .pool = if (self.pool) |p| p.handle else null,
             .pUserData = self.user_data,
             .priority = self.priority,
+            .minAlignment = self.min_alignment,
         };
     }
 };
@@ -461,7 +464,7 @@ pub const DefragmentationPass = struct {
         return .{ .handle = self.moves[i].dstTmpAllocation };
     }
     pub fn setOperation(self: DefragmentationPass, i: usize, op: DefragmentationMoveOperation) void {
-        self.moves[i].operation = @intCast(@intFromEnum(op));
+        self.moves[i].operation = @intCast(@backingInt(op));
     }
 };
 
@@ -520,10 +523,10 @@ pub const Allocator = struct {
 
         var ci = std.mem.zeroes(c.VmaAllocatorCreateInfo);
         ci.flags = info.flags.toInt();
-        ci.instance = toC(c.VkInstance, info.instance);
-        ci.physicalDevice = toC(c.VkPhysicalDevice, info.physical_device);
-        ci.device = toC(c.VkDevice, info.device);
-        ci.vulkanApiVersion = @bitCast(info.api_version);
+        ci.instance = @ptrCast(info.instance);
+        ci.physicalDevice = @ptrCast(info.physical_device);
+        ci.device = @ptrCast(info.device);
+        ci.vulkanApiVersion = info.api_version.toU32();
         ci.pVulkanFunctions = &fns;
         ci.preferredLargeHeapBlockSize = info.preferred_large_heap_block_size;
         ci.pAllocationCallbacks = @ptrCast(info.allocation_callbacks);
@@ -546,9 +549,9 @@ pub const Allocator = struct {
         var ai: c.VmaAllocatorInfo = undefined;
         c.vmaGetAllocatorInfo(self.handle, &ai);
         return .{
-            .instance = toVk(vk.Instance, ai.instance),
-            .physical_device = toVk(vk.PhysicalDevice, ai.physicalDevice),
-            .device = toVk(vk.Device, ai.device),
+            .instance = @ptrCast(ai.instance),
+            .physical_device = @ptrCast(ai.physicalDevice),
+            .device = @ptrCast(ai.device),
         };
     }
 
@@ -671,6 +674,12 @@ pub const Allocator = struct {
     }
 
     // --- explicit allocation ----------------------------------------------
+    pub fn allocateDedicatedMemory(self: Allocator, requirements: *const vk.MemoryRequirements, info: AllocationCreateInfo, p_memory_alloc_next: ?*anyopaque) Error!Allocation {
+        var aci = info.toC();
+        var alloc: c.VmaAllocation = null;
+        try check(c.vmaAllocateDedicatedMemory(self.handle, @ptrCast(requirements), &aci, p_memory_alloc_next, &alloc, null));
+        return .{ .handle = alloc };
+    }
 
     pub fn allocateMemory(self: Allocator, requirements: *const vk.MemoryRequirements, info: AllocationCreateInfo) Error!Allocation {
         var aci = info.toC();
@@ -866,6 +875,15 @@ pub const Allocator = struct {
         return toVk(vk.Buffer, buffer);
     }
 
+    pub fn createDedicatedBuffer(self: Allocator, buffer_info: *const vk.BufferCreateInfo, alloc_info: AllocationCreateInfo, p_memory_alloc_next: ?*anyopaque) Error!BufferResult {
+        var aci = alloc_info.toC();
+        var buffer: c.VkBuffer = null;
+        var alloc: c.VmaAllocation = null;
+        var out: c.VmaAllocationInfo = undefined;
+        try check(c.vmaCreateDedicatedBuffer(self.handle, @ptrCast(buffer_info), &aci, p_memory_alloc_next, &buffer, &alloc, &out));
+        return .{ .buffer = toVk(vk.Buffer, buffer), .allocation = .{ .handle = alloc }, .info = AllocationInfo.from(out) };
+    }
+
     pub fn destroyBuffer(self: Allocator, buffer: vk.Buffer, allocation: Allocation) void {
         c.vmaDestroyBuffer(self.handle, toC(c.VkBuffer, buffer), allocation.handle);
     }
@@ -889,6 +907,15 @@ pub const Allocator = struct {
         var image: c.VkImage = null;
         try check(c.vmaCreateAliasingImage2(self.handle, allocation.handle, local_offset, @ptrCast(image_info), &image));
         return toVk(vk.Image, image);
+    }
+
+    pub fn createDedicatedImage(self: Allocator, image_info: *const vk.ImageCreateInfo, alloc_info: AllocationCreateInfo, p_memory_alloc_next: ?*anyopaque) Error!ImageResult {
+        var aci = alloc_info.toC();
+        var image: c.VkImage = null;
+        var alloc: c.VmaAllocation = null;
+        var out: c.VmaAllocationInfo = undefined;
+        try check(c.vmaCreateDedicatedImage(self.handle, @ptrCast(image_info), &aci, p_memory_alloc_next, &image, &alloc, &out));
+        return .{ .image = toVk(vk.Image, image), .allocation = .{ .handle = alloc }, .info = AllocationInfo.from(out) };
     }
 
     pub fn destroyImage(self: Allocator, image: vk.Image, allocation: Allocation) void {
@@ -1045,6 +1072,7 @@ comptime {
     assert(bitOf(AllocatorCreateFlags, "khr_maintenance4") == c.VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE4_BIT);
     assert(bitOf(AllocatorCreateFlags, "khr_maintenance5") == c.VMA_ALLOCATOR_CREATE_KHR_MAINTENANCE5_BIT);
     assert(bitOf(AllocatorCreateFlags, "khr_external_memory_win32") == c.VMA_ALLOCATOR_CREATE_KHR_EXTERNAL_MEMORY_WIN32_BIT);
+    assert(bitOf(AllocatorCreateFlags, "khr_extended_flags") == c.VMA_ALLOCATOR_CREATE_KHR_EXTENDED_FLAGS_BIT);
 
     assert(bitOf(AllocationCreateFlags, "dedicated_memory") == c.VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT);
     assert(bitOf(AllocationCreateFlags, "never_allocate") == c.VMA_ALLOCATION_CREATE_NEVER_ALLOCATE_BIT);
@@ -1095,7 +1123,7 @@ comptime {
 
 fn refAllDeclsRecursive(comptime T: type) void {
     inline for (comptime std.meta.declarations(T)) |decl| {
-        const field = @field(T, decl.name);
+        const field = @field(T, decl);
         if (@TypeOf(field) == type) {
             switch (@typeInfo(field)) {
                 .@"struct", .@"enum", .@"union", .@"opaque" => refAllDeclsRecursive(field),
