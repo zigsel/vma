@@ -73,11 +73,23 @@ fn check(r: c.VkResult) Error!void {
 /// C API wants opaque pointers. Both are just the same integer, so we convert by
 /// round-tripping through it. A null handle (value 0) becomes a null pointer.
 inline fn toC(comptime CHandle: type, handle: anytype) CHandle {
-    return @ptrFromInt(@intFromEnum(handle));
+    const handle_type_info = @typeInfo(@TypeOf(handle));
+
+    return switch (handle_type_info) {
+        .pointer => @ptrCast(handle),
+        .@"enum" => @ptrFromInt(@backingInt(handle)),
+        else => unreachable,
+    };
 }
 
 inline fn toVk(comptime VkHandle: type, ptr: anytype) VkHandle {
-    return @enumFromInt(@intFromPtr(ptr));
+    const handle_type_info = @typeInfo(VkHandle);
+
+    return switch (handle_type_info) {
+        .pointer => @ptrCast(ptr),
+        .@"enum" => @fromBackingInt(@intCast(@intFromPtr(ptr))),
+        else => unreachable,
+    };
 }
 
 inline fn optName(p: [*c]const u8) ?[*:0]const u8 {
@@ -388,7 +400,7 @@ pub const AllocationCreateInfo = struct {
     fn toC(self: AllocationCreateInfo) c.VmaAllocationCreateInfo {
         return .{
             .flags = self.flags.toInt(),
-            .usage = @intCast(@intFromEnum(self.usage)),
+            .usage = @intCast(@backingInt(self.usage)),
             .requiredFlags = @bitCast(self.required_flags),
             .preferredFlags = @bitCast(self.preferred_flags),
             .memoryTypeBits = self.memory_type_bits,
@@ -461,7 +473,7 @@ pub const DefragmentationPass = struct {
         return .{ .handle = self.moves[i].dstTmpAllocation };
     }
     pub fn setOperation(self: DefragmentationPass, i: usize, op: DefragmentationMoveOperation) void {
-        self.moves[i].operation = @intCast(@intFromEnum(op));
+        self.moves[i].operation = @intCast(@backingInt(op));
     }
 };
 
